@@ -15,5 +15,5 @@ class AspectBaseTest:
         assert not isinstance(aspectbase, aspectclass)
 
     def test_init_needs_aspectclass(self):
-        with pytest.raises(AttributeError) as exc:
+        with pytest.raises(AttributeError):
             aspectbase()
