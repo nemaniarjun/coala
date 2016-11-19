@@ -137,10 +137,13 @@ class ConsoleInteractionTest(unittest.TestCase):
             spaces="•",
             tabs=True,
             tabsize=SpacingHelper.DEFAULT_TAB_WIDTH))
+        self.old_environ = os.environ
+        os.environ = {}
 
     def tearDown(self):
         OpenEditorAction.is_applicable = self.old_open_editor_applicable
         ApplyPatchAction.is_applicable = self.old_apply_patch_applicable
+        os.environ = self.old_environ
 
     def test_require_settings(self):
         curr_section = Section("")
@@ -307,6 +310,33 @@ class ConsoleInteractionTest(unittest.TestCase):
                          patch_result,
                          file_dict)
             self.assertEqual(generator.last_input, 4)
+
+    def test_environ_editor(self):
+        os.environ["EDITOR"] = "test_editor"
+
+        with make_temp() as testfile_path:
+            file_dict = {
+                testfile_path: ["1\n", "2\n", "3\n"],
+            }
+            diff = Diff(file_dict[testfile_path])
+
+            # Check if the user is not asked for the editor if ``$EDITOR`` is
+            # set
+            with simulate_console_inputs(1, 0, 1, 0) as generator:
+                OpenEditorAction.is_applicable = staticmethod(
+                    lambda *args: True)
+
+                patch_result = Result("origin", "msg", diffs={
+                                      testfile_path: diff})
+                patch_result.file = "f_b"
+
+                print_result(self.console_printer,
+                             Section("name"),
+                             self.file_diff_dict,
+                             patch_result,
+                             file_dict)
+
+        os.environ = {}
 
     def test_print_affected_files(self):
         with retrieve_stdout() as stdout, \

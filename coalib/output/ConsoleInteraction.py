@@ -531,10 +531,14 @@ def get_action_info(section, action, failed_actions):
 
     for param_name in params:
         if param_name not in section or action.name in failed_actions:
-            question = format_lines(
-                "Please enter a value for the parameter '{}' ({}): "
-                .format(param_name, params[param_name][0]))
-            section.append(Setting(param_name, input(question)))
+            if param_name == "editor" and "EDITOR" in os.environ:
+                answer = os.environ["EDITOR"]
+            else:
+                question = format_lines(
+                    "Please enter a value for the parameter '{}' ({}): "
+                    .format(param_name, params[param_name][0]))
+                answer = input(question)
+            section.append(Setting(param_name, answer))
 
     return action.name, section
 
