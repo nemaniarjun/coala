@@ -1,5 +1,3 @@
-.. _dev-notes:
-
 Development Setup Notes
 =======================
 
@@ -27,7 +25,7 @@ Using venv
 
         $ cd working_dir # move into the dir where you want to create coala-venv
         $ python3 -m venv coala-venv
-        # This creates a isolated python environment called coala-venv
+        # This creates an isolated Python 3 environment called coala-venv
         # in your current directory.
         # To activate the environment type:
         $ source coala-venv/bin/activate
@@ -40,16 +38,24 @@ Using venv
 Using virtualenv
 ~~~~~~~~~~~~~~~~
 
-- Install virtualenv using pip :
+- Install virtualenv using pip3 :
     ::
 
-        $ pip install virtualenv
+        $ pip3 install virtualenv
 
 - Create the virtualenv :
     ::
 
         $ cd working_dir # move into the dir where you want to create coala-venv
         $ virtualenv coala-venv
+
+NOTE:
+If you have both Python 3 and Python 2 installed try this command
+it creates an isolated Python 3 environment called coala-venv
+in your current directory, as coala only works for Python >= 3.4
+::
+
+    $ virtualenv coala-venv -p $(which python3)
 
 - Run coala-venv :
     ::
@@ -79,27 +85,27 @@ Installing from Git
 -------------------
 
 We recommend first installing the latest development snapshot of coala's
-master branch from and all of its dependencies with pip using
+master branch from and all of its dependencies with pip3 using
 
 ::
 
     (coala-venv)$ git clone https://github.com/coala/coala
     (coala-venv)$ cd coala
-    (coala-venv)$ pip3 install -e .
+    (coala-venv)$ pip3 install .
     (coala-venv)$ cd -
     (coala-venv)$ git clone https://github.com/coala/coala-bears
     (coala-venv)$ cd coala-bears
-    (coala-venv)$ pip3 install -e .
+    (coala-venv)$ pip3 install .
 
-Then you can install a repository-backed version of the repository you would
-like to modify using
+Once you have forked the repository you would like to modify, you can
+install a repository-backed version of the repository using
 
 ::
 
-    (coala-venv)$ pip3 install -e <path/to/clone>
+    (coala-venv)$ pip3 install -e <path/to/forked/repository>
 
 You will then be able to edit the repository and have the changes take effect
-in your virtualenv immediately. You will also be able to use pip to manage
+in your virtualenv immediately. You will also be able to use pip3 to manage
 your installation of the package should you need to install from a different
 source in the future.
 

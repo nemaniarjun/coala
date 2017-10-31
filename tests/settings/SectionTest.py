@@ -1,8 +1,12 @@
 import unittest
 import os
 
+from coalib.bearlib.aspects import AspectList, Root, get as get_aspect
+from coalib.bearlib.aspects.meta import issubaspect
+from coalib.bearlib.languages import Language
 from coalib.misc import Constants
-from coalib.settings.Section import Section, Setting, append_to_sections
+from coalib.settings.Section import (
+    Section, Setting, append_to_sections, extract_aspects_from_section)
 from coalib.settings.ConfigurationGathering import get_config_directory
 from coalib.parsing.Globbing import glob_escape
 
@@ -18,7 +22,7 @@ class SectionTest(unittest.TestCase):
     def test_append(self):
         uut = Section(Constants.COMPLEX_TEST_STRING, None)
         self.assertRaises(TypeError, uut.append, 5)
-        uut.append(Setting(5, 5, 5))
+        uut.append(Setting(5, 5))
         self.assertEqual(str(uut.get('5 ')), '5')
         self.assertEqual(int(uut.get('nonexistent', 5)), 5)
 
@@ -36,16 +40,16 @@ class SectionTest(unittest.TestCase):
     def test_iter(self):
         defaults = Section('default', None)
         uut = Section('name', defaults)
-        uut.append(Setting(5, 5, 5))
-        uut.add_or_create_setting(Setting('TEsT', 4, 5))
-        defaults.append(Setting('tEsT', 1, 3))
-        defaults.append(Setting(' great   ', 3, 8))
-        defaults.append(Setting(' great   ', 3, 8), custom_key='custom')
-        uut.add_or_create_setting(Setting('custom', 4, 8, to_append=True))
-        uut.add_or_create_setting(Setting(' NEW   ', 'val', 8))
-        uut.add_or_create_setting(Setting(' NEW   ', 'vl', 8),
+        uut.append(Setting(5, 5))
+        uut.add_or_create_setting(Setting('TEsT', 4))
+        defaults.append(Setting('tEsT', 1))
+        defaults.append(Setting(' great   ', 3))
+        defaults.append(Setting(' great   ', 3), custom_key='custom')
+        uut.add_or_create_setting(Setting('custom', 4, to_append=True))
+        uut.add_or_create_setting(Setting(' NEW   ', 'val'))
+        uut.add_or_create_setting(Setting(' NEW   ', 'vl'),
                                   allow_appending=False)
-        uut.add_or_create_setting(Setting('new', 'val', 9),
+        uut.add_or_create_setting(Setting('new', 'val'),
                                   custom_key='teSt ',
                                   allow_appending=True)
         self.assertEqual(list(uut), ['5', 'test', 'custom', 'new', 'great'])
@@ -204,3 +208,41 @@ class SectionTest(unittest.TestCase):
         sections['all.c.codestyle'].set_default_section(sections)
         self.assertEqual(sections['all.c.codestyle'].defaults,
                          sections['all'])
+
+    def test_extract_aspects_from_section(self):
+        section = Section('section')
+        section.append(Setting(
+            'aspects',
+            'spelling, commitmessage, methodsmell'))
+        # Custom taste for ColonExistence
+        section.append(Setting('commitmessage:shortlog_colon', 'false'))
+        section.language = Language['py 3.4']
+
+        aspects = extract_aspects_from_section(section)
+        spelling_instance = Root.Spelling('py 3.4')
+        colon_existence_instance = (
+            Root.Metadata.CommitMessage.Shortlog.ColonExistence(
+                'py 3.4', shortlog_colon=False))
+        method_smell_instance = Root.Smell.MethodSmell('py 3.4')
+        trailing_period_instance = (
+            Root.Metadata.CommitMessage.Shortlog.TrailingPeriod('py 3.4'))
+
+        self.assertIsInstance(aspects, AspectList)
+        self.assertEqual(aspects.get('spelling'), spelling_instance)
+        self.assertEqual(aspects.get('colonexistence'),
+                         colon_existence_instance)
+        self.assertEqual(aspects.get('methodsmell'), method_smell_instance)
+        self.assertEqual(aspects.get('TrailingPeriod'),
+                         trailing_period_instance)
+
+    def test_extract_aspects_from_section_with_exclude(self):
+        section = Section('section')
+        section.append(Setting('aspects', 'commitmessage'))
+        section.append(Setting('excludes', 'TrailingPeriod'))
+        section.language = Language['py 3.4']
+
+        aspects = extract_aspects_from_section(section)
+
+        self.assertTrue(issubaspect(get_aspect('trailingperiod'),
+                                    get_aspect('commitmessage')))
+        self.assertIsNone(aspects.get('trailingperiod'))

@@ -3,9 +3,9 @@ import os
 import sys
 from collections import OrderedDict
 
+from coalib.bearlib.aspects import AspectList
 from coalib.collecting.Collectors import collect_registered_bears_dirs
 from coala_utils.decorators import enforce_signature, generate_repr
-from coala_utils.string_processing import unescape
 from coalib.misc.DictUtilities import update_ordered_dict_key
 from coalib.settings.Setting import Setting, path_list
 from coalib.parsing.Globbing import glob_escape
@@ -44,6 +44,34 @@ def append_to_sections(sections,
         key, str(value), origin, from_cli=from_cli, to_append=to_append))
 
 
+def extract_aspects_from_section(section):
+    """
+    Extract aspects settings from a section into an AspectList.
+
+    Note that the section is assumed to already have valid and complete aspects
+    related setting. This checking could be done by
+    :meth:`coalib.settings.ConfigurationGathering.validate_aspect_config`.
+
+    :param section: Section object.
+    :return:        AspectList containing aspectclass instance with
+                    user-defined tastes.
+    """
+    ASPECT_TASTE_DELIMITER = ':'
+    aspects = section.get('aspects')
+    language = section.language
+
+    aspect_instances = AspectList(exclude=section.get('excludes'))
+
+    for aspect in AspectList(aspects):
+        # Search all related tastes in section.
+        tastes = {name.split(ASPECT_TASTE_DELIMITER)[-1]: value
+                  for name, value in section.contents.items()
+                  if name.lower().startswith(aspect.__name__.lower())}
+        aspect_instances.append(aspect(language, **tastes))
+
+    return aspect_instances
+
+
 @generate_repr()
 class Section:
     """
@@ -63,7 +91,7 @@ class Section:
     >>> len(sections)
     1
     >>> str(sections)
-    "{'all': <Section object(contents=OrderedDict([('test1', ..."
+    "{'all': <Section object(... contents=OrderedDict([('test1', ..."
 
     We can also add settings that can be appended to other settings. Basically
     it takes the default value of the setting which resides in the defaults of
@@ -104,6 +132,8 @@ class Section:
         self.name = str(name)
         self.defaults = defaults
         self.contents = OrderedDict()
+        self.aspects = None
+        self.language = None
 
     def bear_dirs(self):
         bear_dirs = path_list(self.get('bear_dirs', ''))
@@ -316,12 +346,32 @@ class Section:
         >>> section.defaults.name
         'all'
 
+        This works case insensitive. The key of the sections dict
+        is expected to be lowered though!
+
+        >>> sections = {'c': Section('C'), 'cpp': Section('Cpp'),
+        ...             'c.something': Section('C.something')}
+        >>> section = Section('C.something')
+        >>> section.set_default_section(sections)
+        >>> section.defaults.name
+        'C'
+        >>> section = Section('C.SOMETHING.else')
+        >>> section.set_default_section(sections)
+        >>> section.defaults.name
+        'C.something'
+        >>> section = Section('Cpp.SOMETHING.else')
+        >>> section.set_default_section(sections)
+        >>> section.defaults.name
+        'Cpp'
+
         :param sections:     A dictionary of sections.
         :param section_name: Optional section name argument to find the default
                              section for. If not given then use member section
                              name.
         """
-        default_section = '.'.join((section_name or self.name).split('.')[:-1])
+        default_section = '.'.join(
+            (section_name or self.name).split('.')[:-1]
+        ).lower()
 
         if default_section:
             if default_section in sections:

@@ -5,6 +5,7 @@ while offering the best possible flexibility.
 """
 
 import logging
+from functools import wraps
 
 from coalib.settings.FunctionMetadata import FunctionMetadata
 
@@ -51,7 +52,7 @@ def deprecate_settings(**depr_args):
     >>> @deprecate_settings(new='old')
     ... def run(new):
     ...     print(new)
-    >>> # doctest: +ELLIPSIS
+    >>> # doctest:
     ... run(old="Hello!", new='coala is always written with lowercase `c`.')
     WARNING:root:The setting `old` is deprecated. Please use `new` instead.
     WARNING:root:The value of `old` and `new` are conflicting. `new` will...
@@ -98,6 +99,7 @@ def deprecate_settings(**depr_args):
 
         logged_deprecated_args = set()
 
+        @wraps(func)
         def wrapping_function(*args, **kwargs):
             for arg, depr_value in wrapping_function.__metadata__.depr_values:
                 deprecated_arg = depr_value[0]

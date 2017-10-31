@@ -11,9 +11,6 @@ from pyprint.Printer import Printer
 from coala_utils.decorators import (enforce_signature, classproperty,
                                     get_public_members)
 
-from dependency_management.requirements.PackageRequirement import (
-    PackageRequirement)
-from dependency_management.requirements.PipRequirement import PipRequirement
 from coalib.bears.BEAR_KIND import BEAR_KIND
 from coalib.output.printers.LogPrinter import LogPrinterMixin
 from coalib.results.Result import Result
@@ -21,15 +18,17 @@ from coalib.settings.FunctionMetadata import FunctionMetadata
 from coalib.settings.Section import Section
 from coalib.settings.ConfigurationGathering import get_config_directory
 
+from .meta import bearclass
 
-class Bear(Printer, LogPrinterMixin):
+
+class Bear(Printer, LogPrinterMixin, metaclass=bearclass):
     """
     A bear contains the actual subroutine that is responsible for checking
     source code for certain specifications. However it can actually do
     whatever it wants with the files it gets. If you are missing some Result
     type, feel free to contact us and/or help us extending the coalib.
 
-    This is the base class for every bear. If you want to write an bear, you
+    This is the base class for every bear. If you want to write a bear, you
     will probably want to look at the GlobalBear and LocalBear classes that
     inherit from this class. In any case you'll want to overwrite at least the
     run method. You can send debug/warning/error messages through the
@@ -43,6 +42,10 @@ class Bear(Printer, LogPrinterMixin):
     To indicate which languages your bear supports, just give it the
     ``LANGUAGES`` value which should be a set of string(s):
 
+    >>> from dependency_management.requirements.PackageRequirement import (
+    ... PackageRequirement)
+    >>> from dependency_management.requirements.PipRequirement import (
+    ... PipRequirement)
     >>> class SomeBear(Bear):
     ...     LANGUAGES = {'C', 'CPP','C#', 'D'}
 
@@ -93,7 +96,7 @@ class Bear(Printer, LogPrinterMixin):
     ... 'Unused Code', 'Redundancy', 'Variable Misuse', 'Spelling',
     ... 'Memory Leak', 'Documentation', 'Duplication', 'Commented Code',
     ... 'Grammar', 'Missing Import', 'Unreachable Code', 'Undefined Element',
-    ... 'Code Simplification'}
+    ... 'Code Simplification', 'Statistics'}
     >>> CAN_FIX = {'Syntax', ...}
 
     Specifying something to CAN_FIX makes it obvious that it can be detected
@@ -130,6 +133,43 @@ class Bear(Printer, LogPrinterMixin):
     >>> class SomeBear(Bear): pass
     >>> SomeBear.source_location
     '...Bear.py'
+
+    Every linter bear makes use of an executable tool for its operations.
+    The SEE_MORE attribute provides a link to the main page of the linter
+    tool:
+
+    >>> class PyLintBear(Bear):
+    ...     SEE_MORE = 'https://www.pylint.org/'
+    >>> PyLintBear.SEE_MORE
+    'https://www.pylint.org/'
+
+    In the future, bears will not survive without aspects. aspects are defined
+    as part of the ``class`` statement's parameter list. According to the
+    classic ``CAN_DETECT`` and ``CAN_FIX`` attributes, aspects can either be
+    only ``'detect'``-able or also ``'fix'``-able:
+
+    >>> from coalib.bearlib.aspects.Metadata import CommitMessage
+
+    >>> class aspectsCommitBear(Bear, aspects={
+    ...         'detect': [CommitMessage.Shortlog.ColonExistence],
+    ...         'fix': [CommitMessage.Shortlog.TrailingPeriod],
+    ... }, languages=['Python']):
+    ...     pass
+
+    >>> aspectsCommitBear.aspects['detect']
+    [<aspectclass 'Root.Metadata.CommitMessage.Shortlog.ColonExistence'>]
+    >>> aspectsCommitBear.aspects['fix']
+    [<aspectclass 'Root.Metadata.CommitMessage.Shortlog.TrailingPeriod'>]
+
+    To indicate the bear uses raw files, set ``USE_RAW_FILES`` to True:
+
+    >>> class RawFileBear(Bear):
+    ...     USE_RAW_FILES = True
+    >>> RawFileBear.USE_RAW_FILES
+    True
+
+    However if ``USE_RAW_FILES`` is enabled the Bear is in charge of managing
+    the file (opening the file, closing the file, reading the file, etc).
     """
 
     LANGUAGES = set()
@@ -144,7 +184,9 @@ class Bear(Printer, LogPrinterMixin):
     CAN_DETECT = set()
     CAN_FIX = set()
     ASCIINEMA_URL = ''
+    SEE_MORE = ''
     BEAR_DEPS = set()
+    USE_RAW_FILES = False
 
     @classproperty
     def name(cls):
@@ -233,6 +275,11 @@ class Bear(Printer, LogPrinterMixin):
 
     def run_bear_from_section(self, args, kwargs):
         try:
+            # Don't get `language` setting from `section.contents`
+            if self.section.language and (
+                    'language' in self.get_metadata()._optional_params or
+                    'language' in self.get_metadata()._non_optional_params):
+                kwargs['language'] = self.section.language
             kwargs.update(
                 self.get_metadata().create_params_from_section(self.section))
         except ValueError as err:
@@ -242,22 +289,35 @@ class Bear(Printer, LogPrinterMixin):
 
         return self.run(*args, **kwargs)
 
-    def execute(self, *args, **kwargs):
+    def execute(self, *args, debug=False, **kwargs):
         name = self.name
         try:
             self.debug('Running bear {}...'.format(name))
+
+            # If `dependency_results` kwargs is defined but there are no
+            # dependency results (usually in Bear that has no dependency)
+            # delete the `dependency_results` kwargs, since most Bears don't
+            # define `dependency_results` kwargs in its `run()` function.
+            if ('dependency_results' in kwargs and
+                    kwargs['dependency_results'] is None and
+                    not self.BEAR_DEPS):
+                del kwargs['dependency_results']
+
             # If it's already a list it won't change it
             result = self.run_bear_from_section(args, kwargs)
             return [] if result is None else list(result)
-        except (Exception, SystemExit):
+        except (Exception, SystemExit) as exc:
+            if debug and not isinstance(exc, SystemExit):
+                raise
+
             if self.kind() == BEAR_KIND.LOCAL:
-                self.warn('Bear {} failed to run on file {}. Take a look '
-                          'at debug messages (`-V`) for further '
-                          'information.'.format(name, args[0]))
+                self.err('Bear {} failed to run on file {}. Take a look '
+                         'at debug messages (`-V`) for further '
+                         'information.'.format(name, args[0]))
             else:
-                self.warn('Bear {} failed to run. Take a look '
-                          'at debug messages (`-V`) for further '
-                          'information.'.format(name))
+                self.err('Bear {} failed to run. Take a look '
+                         'at debug messages (`-V`) for further '
+                         'information.'.format(name))
             self.debug(
                 'The bear {bear} raised an exception. If you are the author '
                 'of this bear, please make sure to catch all exceptions. If '
@@ -282,7 +342,7 @@ class Bear(Printer, LogPrinterMixin):
         """
         return FunctionMetadata.from_function(
             cls.run,
-            omit={'self', 'dependency_results'})
+            omit={'self', 'dependency_results', 'language'})
 
     @classmethod
     def __json__(cls):
@@ -301,6 +361,8 @@ class Bear(Printer, LogPrinterMixin):
                                     for param in non_optional_params),
             'optional_params': ({param: optional_params[param][0]}
                                 for param in optional_params)}
+        if hasattr(cls, 'languages'):
+            _dict['languages'] = (str(language) for language in cls.languages)
         return _dict
 
     @classmethod
@@ -357,7 +419,8 @@ class Bear(Printer, LogPrinterMixin):
         This function gets executed at construction.
 
         Section value requirements shall be checked inside the ``run`` method.
-
+        >>> from dependency_management.requirements.PipRequirement import (
+        ... PipRequirement)
         >>> class SomeBear(Bear):
         ...     REQUIREMENTS = {PipRequirement('pip')}
 
@@ -370,12 +433,18 @@ class Bear(Printer, LogPrinterMixin):
         >>> SomeOtherBear.check_prerequisites()
         'really_bad_package is not installed. You can install it using ...'
 
+        >>> class anotherBear(Bear):
+        ...     REQUIREMENTS = {PipRequirement('bad_package', '0.0.1')}
+
+        >>> anotherBear.check_prerequisites()
+        'bad_package 0.0.1 is not installed. You can install it using ...'
+
         :return: True if prerequisites are satisfied, else False or a string
                  that serves a more detailed description of what's missing.
         """
         for requirement in cls.REQUIREMENTS:
             if not requirement.is_installed():
-                return requirement.package + ' is not installed. You can ' + (
+                return str(requirement) + ' is not installed. You can ' + (
                     'install it using ') + (
                     ' '.join(requirement.install_command()))
         return True

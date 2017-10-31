@@ -8,6 +8,7 @@ import shutil
 from subprocess import check_call, CalledProcessError, DEVNULL
 from types import MappingProxyType
 
+from coalib.bearlib.abstractions.LinterClass import LinterClass
 from coalib.bears.LocalBear import LocalBear
 from coalib.bears.GlobalBear import GlobalBear
 from coala_utils.ContextManagers import make_temp
@@ -42,7 +43,8 @@ def _prepare_options(options, bear_class):
     if not options['use_stdout'] and not options['use_stderr']:
         raise ValueError('No output streams provided at all.')
 
-    if options['output_format'] == 'corrected':
+    if (options['output_format'] == 'corrected' or
+            options['output_format'] == 'unified-diff'):
         if (
                 'diff_severity' in options and
                 options['diff_severity'] not in RESULT_SEVERITY.reverse):
@@ -330,6 +332,42 @@ def _create_linter(klass, options):
                 result_params['affected_code'] = (range,)
             return Result(**result_params)
 
+        def process_diff(self,
+                         diff,
+                         filename,
+                         diff_severity,
+                         result_message,
+                         diff_distance):
+            """
+            Processes the given ``coalib.results.Diff`` object and yields
+            correction results.
+
+            :param diff:
+                An instance of ``coalib.results.Diff`` object containing
+                differences of the file named ``filename``.
+            :param filename:
+                The name of the file currently being corrected.
+            :param diff_severity:
+                The severity to use for generating results.
+            :param result_message:
+                The message to use for generating results.
+            :param diff_distance:
+                Number of unchanged lines that are allowed in between two
+                changed lines so they get yielded as one diff. If a negative
+                distance is given, every change will be yielded as an own diff,
+                even if they are right beneath each other.
+            :return:
+                An iterator returning results containing patches for the
+                file to correct.
+            """
+            for splitted_diff in diff.split_diff(distance=diff_distance):
+                yield Result(self,
+                             result_message,
+                             affected_code=splitted_diff.affected_code(
+                                 filename),
+                             diffs={filename: splitted_diff},
+                             severity=diff_severity)
+
         def process_output_corrected(self,
                                      output,
                                      filename,
@@ -359,15 +397,50 @@ def _create_linter(klass, options):
                 An iterator returning results containing patches for the
                 file to correct.
             """
-            for diff in Diff.from_string_arrays(
-                file,
-                output.splitlines(keepends=True)).split_diff(
-                    distance=diff_distance):
-                yield Result(self,
-                             result_message,
-                             affected_code=diff.affected_code(filename),
-                             diffs={filename: diff},
-                             severity=diff_severity)
+            return self.process_diff(
+                Diff.from_string_arrays(
+                    file,
+                    output.splitlines(keepends=True)),
+                filename,
+                diff_severity,
+                result_message,
+                diff_distance)
+
+        def process_output_unified_diff(self,
+                                        output,
+                                        filename,
+                                        file,
+                                        diff_severity=RESULT_SEVERITY.NORMAL,
+                                        result_message='Inconsistency found.',
+                                        diff_distance=1):
+            """
+            Processes the executable's output as a unified diff.
+
+            :param output:
+                The output of the program as a string containing the
+                unified diff for correction.
+            :param filename:
+                The filename of the file currently being corrected.
+            :param file:
+                The contents of the file currently being corrected.
+            :param diff_severity:
+                The severity to use for generating results.
+            :param result_message:
+                The message-string to use for generating results.
+            :param diff_distance:
+                Number of unchanged lines that are allowed in between two
+                changed lines so they get yielded as one diff. If a negative
+                distance is given, every change will be yielded as an own diff,
+                even if they are right beneath each other.
+            :return:
+                An iterator returning results containing patches for the
+                file to correct.
+            """
+            return self.process_diff(Diff.from_unified_diff(output, file),
+                                     filename,
+                                     diff_severity,
+                                     result_message,
+                                     diff_distance)
 
         def process_output_regex(
                 self, output, filename, file, output_regex,
@@ -461,6 +534,16 @@ def _create_linter(klass, options):
 
                 _processing_function = partialmethod(
                     process_output_corrected, **_process_output_args)
+
+            elif options['output_format'] == 'unified-diff':
+                _process_output_args = {
+                    key: options[key]
+                    for key in ('result_message', 'diff_severity',
+                                'diff_distance')
+                    if key in options}
+
+                _processing_function = partialmethod(
+                    process_output_unified_diff, **_process_output_args)
 
             else:
                 assert options['output_format'] == 'regex'
@@ -572,7 +655,8 @@ def _create_linter(klass, options):
                     return
 
                 arguments = (self.get_executable(),) + args
-                self.debug("Running '{}'".format(' '.join(arguments)))
+                self.debug("Running '{}'".format(
+                    ' '.join(str(arg) for arg in arguments)))
 
                 output = run_shell_command(
                     arguments,
@@ -594,7 +678,12 @@ def _create_linter(klass, options):
             return '<{} linter object (wrapping {!r}) at {}>'.format(
                 type(self).__name__, self.get_executable(), hex(id(self)))
 
-    class LocalLinterBase(LinterBase, LocalBear):
+    class LocalLinterMeta(type(LinterBase), type(LocalBear)):
+        """
+        Solving base metaclasses conflict for ``LocalLinterBase``.
+        """
+
+    class LocalLinterBase(LinterBase, LocalBear, metaclass=LocalLinterMeta):
 
         @staticmethod
         def create_arguments(filename, file, config_file):
@@ -616,7 +705,12 @@ def _create_linter(klass, options):
             """
             raise NotImplementedError
 
-    class GlobalLinterBase(LinterBase, GlobalBear):
+    class GlobalLinterMeta(type(LinterBase), type(GlobalBear)):
+        """
+        Solving base metaclasses conflict for ``GlobalLinterBase``.
+        """
+
+    class GlobalLinterBase(LinterBase, GlobalBear, metaclass=GlobalLinterMeta):
 
         @staticmethod
         def create_arguments(config_file):
@@ -644,6 +738,7 @@ def _create_linter(klass, options):
     result_klass = type(klass.__name__, (klass, LinterBaseClass), {
         '__module__': klass.__module__})
     result_klass.__doc__ = klass.__doc__ or ''
+    LinterClass.register(result_klass)
     return result_klass
 
 
@@ -659,8 +754,9 @@ def linter(executable: str,
            output_format: (str, None)=None,
            **options):
     """
-    Decorator that creates a ``LocalBear`` that is able to process results from
-    an external linter tool.
+    Decorator that creates a ``Bear`` that is able to process results from
+    an external linter tool. Depending on the value of ``global_bear`` this
+    can either be a ``LocalBear`` or a ``GlobalBear``.
 
     The main functionality is achieved through the ``create_arguments()``
     function that constructs the command-line-arguments that get passed to your
@@ -670,6 +766,17 @@ def linter(executable: str,
     ... class XLintBear:
     ...     @staticmethod
     ...     def create_arguments(filename, file, config_file):
+    ...         return "--lint", filename
+
+    Or for a ``GlobalBear`` without the ``filename`` and ``file``:
+
+    >>> @linter("ylint",
+    ...         global_bear=True,
+    ...         output_format="regex",
+    ...         output_regex="...")
+    ... class YLintBear:
+    ...     @staticmethod
+    ...     def create_arguments(config_file):
     ...         return "--lint", filename
 
     Requiring settings is possible like in ``Bear.run()`` with supplying
@@ -730,6 +837,11 @@ def linter(executable: str,
     and ``use_stderr=False`` raises a ``ValueError``. By default ``use_stdout``
     is ``True`` and ``use_stderr`` is ``False``.
 
+    Every ``linter`` is also a subclass of the ``LinterClass`` class.
+
+    >>> issubclass(XLintBear, LinterClass)
+    True
+
     Documentation:
     Bear description shall be provided at class level.
     If you document your additional parameters inside ``create_arguments``,
@@ -768,8 +880,7 @@ def linter(executable: str,
         provided together with ``prerequisite_check_command``.
     :param global_bear:
         Whether the created bear should be a ``GlobalBear`` or not. Global
-        bears will be run only once instead of once per file. The ``file``
-        and ``filename`` args of all their methods will default to ``None``.
+        bears will be run once on the whole project, instead of once per file.
         Incompatible with ``use_stdin=True``.
     :param output_format:
         The output format of the underlying executable. Valid values are
@@ -781,6 +892,8 @@ def linter(executable: str,
           ``output_regex``.
         - ``'corrected'``: The output is the corrected of the given file. Diffs
           are then generated to supply patches for results.
+        - ``'unified_diff'``: The output is the unified diff of the corrections.
+          Patches are then supplied for results using this output.
 
         Passing something else raises a ``ValueError``.
     :param output_regex:
@@ -822,21 +935,21 @@ def linter(executable: str,
         used inside ``output_regex`` and this parameter is given.
     :param diff_severity:
         The severity to use for all results if ``output_format`` is
-        ``'corrected'``. By default this value is
+        ``'corrected'`` or ``'unified_diff'``. By default this value is
         ``coalib.results.RESULT_SEVERITY.NORMAL``. The given value needs to be
         defined inside ``coalib.results.RESULT_SEVERITY``.
     :param result_message:
         The message-string to use for all results. Can be used only together
-        with ``corrected`` or ``regex`` output format. When using
-        ``corrected``, the default value is ``"Inconsistency found."``, while
-        for ``regex`` this static message is disabled and the message matched
-        by ``output_regex`` is used instead.
+        with ``corrected`` or ``unified_diff`` or ``regex`` output format.
+        When using ``corrected`` or ``unified_diff``, the default value is
+        ``"Inconsistency found."``, while for ``regex`` this static message is
+        disabled and the message matched by ``output_regex`` is used instead.
     :param diff_distance:
         Number of unchanged lines that are allowed in between two changed lines
-        so they get yielded as one diff if ``corrected`` output-format is
-        given. If a negative distance is given, every change will be yielded as
-        an own diff, even if they are right beneath each other. By default this
-        value is ``1``.
+        so they get yielded as one diff if ``corrected`` or ``unified_diff``
+        output-format is given. If a negative distance is given, every change
+        will be yielded as an own diff, even if they are right beneath each
+        other. By default this value is ``1``.
     :raises ValueError:
         Raised when invalid options are supplied.
     :raises TypeError:

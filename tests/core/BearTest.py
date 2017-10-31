@@ -1,10 +1,12 @@
+import datetime
 from itertools import permutations
 from os.path import abspath, exists, isfile, join, getmtime
 import shutil
-from time import sleep
 import unittest
 
 from dependency_management.requirements.PipRequirement import PipRequirement
+
+from freezegun import freeze_time
 
 import requests
 
@@ -187,7 +189,9 @@ class BearTest(unittest.TestCase):
         filename = 'test.html'
         file_location = join(uut.data_dir, filename)
 
-        with requests_mock.Mocker() as reqmock:
+        with freeze_time('2017-01-01') as frozen_datetime, \
+                requests_mock.Mocker() as reqmock:
+
             reqmock.get(mock_url, text=mock_text)
             self.assertFalse(isfile(file_location))
             expected_filename = file_location
@@ -195,8 +199,8 @@ class BearTest(unittest.TestCase):
             self.assertTrue(isfile(join(file_location)))
             self.assertEqual(result_filename, expected_filename)
             expected_time = getmtime(file_location)
-            sleep(0.5)
 
+            frozen_datetime.tick(delta=datetime.timedelta(seconds=0.5))
             result_filename = uut.download_cached_file(mock_url, filename)
             self.assertEqual(result_filename, expected_filename)
             result_time = getmtime(file_location)
@@ -207,13 +211,13 @@ class BearTest(unittest.TestCase):
         exc = requests.exceptions.ConnectTimeout
         with requests_mock.Mocker() as reqmock:
             reqmock.get(mock_url, exc=exc)
-            with self.assertRaisesRegexp(exc, '^$'):
+            with self.assertRaisesRegex(exc, '^$'):
                 Bear.download_cached_file(
                     mock_url, 'test.html')
 
     def test_download_cached_file_status_code_error(self):
         exc = requests.exceptions.HTTPError
-        with self.assertRaisesRegexp(exc, '418 Client Error'):
+        with self.assertRaisesRegex(exc, '418 Client Error'):
             Bear.download_cached_file(
                 'http://httpbin.org/status/418', 'test.html')
 

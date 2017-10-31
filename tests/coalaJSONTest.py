@@ -8,7 +8,11 @@ from pkg_resources import VersionConflict
 
 from coalib import coala, coala_json
 from coala_utils.ContextManagers import prepare_file
-from tests.TestUtilities import bear_test_module, execute_coala
+from tests.TestUtilities import (
+    bear_test_module,
+    execute_coala,
+    TEST_BEARS_COUNT,
+)
 
 
 class coalaJSONTest(unittest.TestCase):
@@ -22,7 +26,7 @@ class coalaJSONTest(unittest.TestCase):
     def test_deprecation_log(self):
         retval, stdout, stderr = execute_coala(
             coala_json.main, 'coala-json', '--help')
-        self.assertIn('Use of `coala-json` binary is deprecated', stderr)
+        self.assertIn('Use of `coala-json` executable is deprecated', stderr)
         self.assertIn('usage: coala', stdout)
 
     def test_nonexistent(self):
@@ -30,7 +34,9 @@ class coalaJSONTest(unittest.TestCase):
             coala.main, 'coala', '--json', '-c', 'nonex', 'test')
         test_text = '{\n  "results": {}\n}\n'
         self.assertEqual(stdout, test_text)
-        self.assertRegex(stderr, ".*requested coafile '.*' does not exist. .+")
+        self.assertRegex(stderr, ".*Requested coafile '.*' does not exist")
+        self.assertNotEqual(retval, 0,
+                            'coala must return nonzero when errors occured')
 
     def test_find_issues(self):
         with bear_test_module(), \
@@ -60,6 +66,8 @@ class coalaJSONTest(unittest.TestCase):
             self.assertEqual(stdout, test_text)
             self.assertIn('During execution, we found that some',
                           stderr, 'Missing settings not logged')
+            self.assertNotEqual(retval, 0,
+                                'coala must return nonzero when errors occured')
 
     def test_show_all_bears(self):
         with bear_test_module():
@@ -67,13 +75,14 @@ class coalaJSONTest(unittest.TestCase):
                 coala.main, 'coala', '--json', '-B', '-I')
             self.assertEqual(retval, 0)
             output = json.loads(stdout)
-            self.assertEqual(len(output['bears']), 6)
+            self.assertEqual(len(output['bears']), TEST_BEARS_COUNT)
             self.assertFalse(stderr)
 
     def test_show_language_bears(self):
         with bear_test_module():
             retval, stdout, stderr = execute_coala(
-                coala.main, 'coala', '--json', '-B', '-l', 'java', '-I')
+                coala.main, 'coala', '--json', '-B', '--filter-by', 'language',
+                'java', '-I')
             self.assertEqual(retval, 0)
             output = json.loads(stdout)
             self.assertEqual(len(output['bears']), 2)
@@ -112,9 +121,11 @@ class coalaJSONTest(unittest.TestCase):
             coala.main, 'coala', '--json', '-c', 'nonex')
         test_text = '{\n  "results": {}\n}\n'
         self.assertRegex(
-            stderr,
-            ".*\\[ERROR\\].*The requested coafile '.*' does not exist. .+\n")
+             stderr,
+             ".*\\[ERROR\\].*Requested coafile '.*' does not exist")
         self.assertEqual(stdout, test_text)
+        self.assertNotEqual(retval, 0,
+                            'coala must return nonzero when errors occured')
 
     def test_output_file(self):
         with prepare_file(['#todo this is todo'], None) as (lines, filename):
@@ -127,6 +138,8 @@ class coalaJSONTest(unittest.TestCase):
 
         with open('file.json') as fp:
             data = json.load(fp)
+        os.remove('file.json')
+
         output = json.loads(stdout1)
         self.assertFalse(stderr1)
         # Remove 'time' key from both as we cant compare them
@@ -138,4 +151,40 @@ class coalaJSONTest(unittest.TestCase):
         self.assertFalse(retval2)
         self.assertFalse(stdout2)
         self.assertFalse(stderr2)
+
+    def test_output_file_overwriting(self):
+        with prepare_file(['#todo this is todo'], None) as (lines, filename):
+            args = (coala.main, 'coala', '--json', '-c', os.devnull, '-b',
+                    'LineCountTestBear', '-f', re.escape(filename),
+                    '--log-json', '-o', 'file.json')
+            execute_coala(*args)
+
+            with open('file.json') as fp:
+                data = json.load(fp)
+
+            execute_coala(*args)
+
+            with open('file.json') as fp:
+                new_data = json.load(fp)
+
         os.remove('file.json')
+
+        for log_index in range(len(data['logs'])):
+            del data['logs'][log_index]['timestamp']
+            del new_data['logs'][log_index]['timestamp']
+
+        self.assertEqual(data, new_data)
+
+    def test_show_language_bears_output_file(self):
+        with bear_test_module():
+            retval, stdout, stderr = execute_coala(
+                coala.main, 'coala', '--json', '-B', '--filter-by', 'language',
+                'java', '-I', '--output', 'bears.json')
+
+        with open('bears.json') as fp:
+            data = json.load(fp)
+        os.remove('bears.json')
+
+        self.assertEqual(retval, 0)
+        self.assertEqual(len(data['bears']), 2)
+        self.assertFalse(stderr)

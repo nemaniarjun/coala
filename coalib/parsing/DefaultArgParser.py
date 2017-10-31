@@ -2,6 +2,7 @@ import argparse
 
 from coalib.misc import Constants
 from coalib.collecting.Collectors import get_all_bears_names
+from coalib.parsing.FilterHelper import available_filters
 
 
 class CustomFormatter(argparse.RawDescriptionHelpFormatter):
@@ -38,7 +39,7 @@ code, regardless of the programming languages you use.
 To find out what kind of analysis coala offers for the languages you use, visit
 http://coala.io/languages, or run::
 
-    $ coala --show-bears --filter-by-language C Python
+    $ coala --show-bears --filter-by language C Python
 
 To perform code analysis, simply specify the analysis routines (bears) and the
 files you want it to run on, for example:
@@ -187,6 +188,13 @@ To run coala without user interaction, run the `coala --non-interactive`,
         help='filters `--show-bears` by the given languages')
 
     outputs_group.add_argument(
+        '--filter-by', action='append', nargs='+',
+        metavar=('FILTER_NAME FILTER_ARG', 'FILTER_ARG'),
+        help='filters `--show-bears` by the filter given as argument. '
+             'Available filters: {}'.format(', '.join(sorted(
+                 available_filters))))
+
+    outputs_group.add_argument(
         '-p', '--show-capabilities', nargs='+', metavar='LANG',
         help='show what coala can fix and detect for the given languages')
 
@@ -230,11 +238,23 @@ To run coala without user interaction, run the `coala --non-interactive`,
         '-n', '--no-orig', const=True, action='store_const',
         help="don't create .orig backup files before patching")
 
-    try:  # pragma: no cover
+    misc_group.add_argument(
+        '-A', '--single-action', const=True, action='store_const',
+        help='apply a single action for all results')
+
+    misc_group.add_argument(
+        '--debug', const=True, action='store_const',
+        help='run coala in debug mode, starting ipdb, '
+             'which must be separately installed, '
+             'on unexpected internal exceptions '
+             '(implies --verbose)')
+
+    try:
         # Auto completion should be optional, because of somewhat complicated
         # setup.
         import argcomplete
         argcomplete.autocomplete(arg_parser)
-    except ImportError:
+    except ImportError:  # pragma: no cover
         pass
+
     return arg_parser
